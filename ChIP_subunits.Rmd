@@ -1,0 +1,261 @@
+---
+title: "MSY subunits overlapping ChIP-seq anti-DMC1 peaks"
+author: "Lucas A. Nell"
+date: "March 25, 2016"
+output: 
+html_document:
+    self_contained: true
+    highlight: haddock
+runtime: shiny
+---
+
+
+```{r setup, include = FALSE, eval = TRUE, echo = FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE)
+knitr::read_chunk('ChIP_subunits.R')
+```
+
+# Preamble
+
+## Required packages
+```{r packages, message = FALSE}
+```
+
+## `ggplot2` theme
+A minimalistic theme for plots.
+```{r ggplot_theme}
+```
+
+
+
+# Table of subunit locations on mouse Y-chromosome long arm
+
+## Download
+I first downloaded Table S4 (`'mmc4.xlsx'`) from Soh et al. (2014) in *Cell* 
+([link](http://dx.doi.org/10.1016/j.cell.2014.09.052)).
+
+I'll assume you've downloaded it to directory `table_dir`, which for me was simply `'.'`.
+
+## Initial read
+The initial excel file included column names too long for my tastes, so I skipped the
+header row and made my own column names. I also specified column types for reasons of
+paranoia.
+I then saved this data frame as a compressed `.RData` file, which is much smaller than a 
+non-compressed `.xlsx`.
+
+```{r initial_read, eval = FALSE}
+table_dir <- '.'
+
+subunit_df <- read_excel(paste0(table_dir, '/mmc4.xlsx'),
+                       skip = 1, 
+                       col_names = c('start', 'end', 'subunit'),
+                       col_types = c('numeric', 'numeric', 'text'))
+save(subunit_df, file = 'ChIP_subunits.RData', compress = TRUE)
+```
+
+## Subsequent reads
+After the initial processing, I could remove the `mmc4.xlsx` file and simply `load` the
+`RData` file made previously.
+
+```{r load_RData}
+```
+
+
+
+# ChIP-seq peak files
+
+## SISSRs algorithm
+
+The SISSRs (Site Identification from Short Sequence Reads)
+
+I downloaded 
+
+
+I next input the `'*.bsites'` files that were output from the SISSRs peak-finding 
+algorithm. I wanted to combine tables from multiple samples, plus filter for only 
+peaks located in the male-specific Y (MSY) long arm. In the filename for the `*.bsites`
+file, the suffix `"_Y_Dq_Pv01"` indicates it's aligned to chromosome Y, used the 
+anti-DMC1 antibody, was filtered for MAPQ ≥ 20, and had a cutoff p-value of 0.01.
+
+> *Note*: Here, sample name and strain name are synonymous since I only have one sample
+> per strain. If this changes, obviously this code will need to be updated, too.
+
+
+```{r input_peaks}
+```
+
+
+
+# Preliminary comparison of subunits to ChIP-seq peak densities
+
+The following plot shows how peak starting locations (bottom rug plot) relate to the
+density of subunit starting locations (histogram) along the MSY long tail.
+
+```{r comparison_plot}
+```
+
+
+
+# Counting subunits
+
+The function below is to find the number of subunits within a given sized 
+'flank' on each side of peak's center. I chose a flank of 10 Mb (for a total window size
+= 2 Mb + 1 b). I used `sapply` so that I can input a vector for `centers`, 
+instead of just one position at a time. This makes computations faster (vs for-loop), 
+and makes future code much simpler.
+
+```{r over_counts}
+```
+
+
+I next created new columns with peak center positions, and the # of overlapping subunits.
+I grouped by sample because I don't want to aggregate all calculations over all samples. 
+I lastly made the `sample` column into a factor for easy plotting, and made a summary 
+data frame for later calculations.
+
+```{r compute_overs}
+```
+
+
+
+
+
+# Bootstrap peak centers
+
+
+## Set range of possible peak centers
+I set the range of possible center locations based on two facts:
+
+1. The length of narrowest ChIP-seq peak should be 41 based on SISSRs algorithm
+2. Widest possible range of values for centers (since I filtered `peak_df` for 
+whether it's within the MSY based on start and end positions, not centers) should be 
+from `MSY_start + narrowest_center` to `MSY_end - narrowest_center`
+
+
+```{r bootInterval, eval = FALSE}
+narrowest_center <- median(c(1, 41))
+possible_centers <- seq(min(subunit_df$start) + narrowest_center, 
+                     max(subunit_df$end) - narrowest_center)
+```
+
+
+## Run bootstraps
+Function `one_boot` runs a single bootstrap replicate, given a sample size `n` by 
+sampling `n` locations within `possible_centers` (with replacement) and getting the number
+of overlapping subunits for each. 
+
+I then ran 10,000 bootstrap resamples, of sample size n~1~ + n~2~ + n~3~ (for all 3
+samples from `peak_df`), and output results to `pos_boot_matrix`.
+
+```{r bootstrapping, eval = FALSE}
+one_boot <- function(n){
+    boot_centers <- sample(possible_centers, replace = TRUE, size = n)
+    boot_over_counts <- over_counts(boot_centers)
+    return(boot_over_counts)
+}
+
+set.seed(80502)
+pos_boot_matrix <- replicate(1e4, expr = one_boot(n = nrow(peak_df)))
+```
+
+```{r input_boot_results, echo = FALSE}
+```
+
+
+
+
+## Bootstrap plots
+
+
+
+```{r after_boot}
+# Data frame of mean and sd by sample and simulation #
+pos_boot_df <- pos_boot_matrix %>%
+    tibble::as_data_frame(.) %>%
+    # Factor to split matrix of bootstrap resamples by sample: peak_df$sample
+    mutate(sample = (peak_df$sample)) %>% # Extra parentheses prevent an error
+    gather('sim', 'overs', -sample) %>%
+    # Change 'V1', 'V2', etc. column names to an integer vector of simulation #:
+    mutate(sim = as.integer(sim %>% gsub('V', '', .))) %>%
+    group_by(sample, sim) %>%
+    summarize(mean = mean(overs), sd = sd(overs)) %>%
+    group_by(sample) %>%
+    select(sample, mean, sd)
+
+
+# Data frame of p values
+p_df <- data.frame(sample = factor(levels(peak_df$sample), levels = c('B6', '9R', '13R')),
+                  mean = sapply(levels(peak_df$sample), function(sampName){
+                      focalMean <- (summary_df %>% 
+                                        filter(sample == sampName) %>% 
+                                        select(mean))[[1]]
+                      pos_boot_df %>% 
+                          # We predict higher mean overlaps in peak sites
+                          filter(sample == sampName, mean >= focalMean) %>% 
+                          nrow() / 10000}
+                  ),
+                  sd = sapply(levels(peak_df$sample), function(sampName){
+                      focalSD <- (summary_df %>% 
+                                      filter(sample == sampName) %>% 
+                                      select(sd))[[1]]
+                      pos_boot_df %>% 
+                          # We predict lower variability in peak sites
+                          filter(sample == sampName, sd <= focalSD) %>% 
+                          nrow() / 10000}
+                  )) %>%
+    as.tbl()
+
+
+```
+
+
+
+Histogram of the mean numbers of subunits within flanks for 10^4^ bootstrap resamples of
+positions along MSY long arm, in relation to mean subunits in flanks for each sample 
+(dashed lines). P-values for tests of H~0~: µ~sample~ ≤ µ~random~ are shown.
+
+
+```{r bootPlotMean}
+
+
+pos_boot_df %>%
+    ggplot(aes(x = mean, color = sample, fill = sample)) +
+    plot_theme() +
+    xlab('Mean # subunits overlapping flanks') +
+    geom_histogram(binwidth = 0.5, color = NA, alpha = 0.8) +
+    geom_vline(data = summary_df, aes(xintercept = mean, color = sample), 
+               linetype = 2) + 
+    geom_text(data = p_df, aes(label = paste0(sample, ':  P = ', mean), 
+                              x = 65, y = 1000), 
+              hjust = 0, vjust = 1, nudge_y = c(0, -100, -200)) +
+    scale_fill_brewer(type = "qual", palette = 'Dark2') +
+    scale_color_brewer(type = "qual", palette = 'Dark2')
+```
+
+
+Histogram of the standard deviation of subunits within flanks for 10^4^ bootstrap 
+resamples of positions along MSY long arm, in relation to standard deviations of 
+subunits in flanks for each sample (dashed lines). P-values for tests of H~0~: 
+σ~sample~ ≥ σ~random~ are shown.
+
+
+```{r bootPlotSD}
+
+pos_boot_df %>%
+    ggplot(aes(x = sd, color = sample, fill = sample)) +
+    plot_theme() +
+    xlab('Standard deviation of the # subunits overlapping flanks') +
+    geom_histogram(binwidth = 0.25, color = NA, alpha = 0.8) +
+    geom_vline(data = summary_df, aes(xintercept = sd, color = sample), 
+               linetype = 2) + 
+    geom_text(data = p_df, aes(label = paste0(sample, ':  P = ', sd), 
+                              x = 5, y = 1000), 
+              hjust = 0, vjust = 1, nudge_y = c(0, -100, -200)) +
+    scale_fill_brewer(type = "qual", palette = 'Dark2') +
+    scale_color_brewer(type = "qual", palette = 'Dark2')
+
+
+```
+
+
+<!-- rmarkdown::render('ChIP_subunits.Rmd') -->
