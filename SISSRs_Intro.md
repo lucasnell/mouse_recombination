@@ -47,7 +47,7 @@ BED files can be found in the directory
 `/Volumes/MW_18TB/Lucas_Nell/lan/musChIP/bed`. I primarily used BED files that were
 filtered for mapping quality (MAPQ) ≥ 20.
 
-> *MAPQ = -10 * log10(p)*
+*`MAPQ = -10 * log10(p)`*
 
 "... where *p* is an estimate of the probability that the alignment does not 
 correspond to the read's true point of origin." 
@@ -127,11 +127,13 @@ export PATH=${PATH}:~/SISSRs
 
 Now you can run the SISSRs algorithm in the directory for BED and bsites files.
 The following code uses many of the parameters also used in Brick et al. (2012) 
-[link](http://dx.doi.org/10.1038/nature11089), plus a p-value cutoff of 0.01. 
+([link](http://dx.doi.org/10.1038/nature11089)), plus a p-value cutoff of 0.01. 
 It also assumes the above naming scheme to auto-generate the input DNA filename
 and the output bsites filename. Lastly, I'm adding an object `output_dir` so that you 
 don't actually make new files in the original directory.
 This is because you are not yet worthy of trust.
+
+Comments below explain what some lines of code are doing.
 
 ```bash
 export PATH=${PATH}:~/SISSRs
@@ -143,7 +145,7 @@ p_val=0.01
 
 # Using ticks to create a variable from the stdout from a command
 # Piping to sed 's/string2/string2/' replaces any "string1" in the stdout to "string2"
-input_bed=`echo ${chip_bed} | sed 's/_D/_Di/g; s/_H/_Hi/g'`
+input_dna_bed=`echo ${chip_bed} | sed 's/_D/_Di/g; s/_H/_Hi/g'`
 
 # The commands ${var/%x/y} and ${var/#x/y} replaces "x" at the beginning and end of the
 # variable var with "y"
@@ -155,7 +157,7 @@ output_dir=~/Desktop
 
 # Running SISSRs
 sissrs.pl -i ${chip_bed} -o ${output_dir}/${output_name} \
-    -s 2700000000 -a -F 1000 -E 10 -p ${p_val} -b ${input_bed}
+    -s 2700000000 -a -F 1000 -E 10 -p ${p_val} -b ${input_dna_bed}
 ```
 
 
