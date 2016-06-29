@@ -11,7 +11,7 @@ runtime: shiny
 
 
 ```{r setup, include = FALSE, eval = TRUE, echo = FALSE}
-knitr::opts_chunk$set(echo = TRUE, eval = TRUE)
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, comment = '', prompt = FALSE)
 knitr::read_chunk('ChIP_subunits.R')
 ```
 
@@ -21,8 +21,8 @@ knitr::read_chunk('ChIP_subunits.R')
 ```{r packages, message = FALSE}
 ```
 
-## `ggplot2` theme
-A minimalistic theme for plots.
+## `ggplot2` theme and palettes
+A minimalistic theme for plots, plus fill and color palettes.
 ```{r ggplot_theme}
 ```
 
@@ -63,13 +63,6 @@ After the initial processing, I could remove the `mmc4.xlsx` file and simply `lo
 
 
 # ChIP-seq peak files
-
-## SISSRs algorithm
-
-The SISSRs (Site Identification from Short Sequence Reads)
-
-I downloaded 
-
 
 I next input the `'*.bsites'` files that were output from the SISSRs peak-finding 
 algorithm. I wanted to combine tables from multiple samples, plus filter for only 
@@ -140,12 +133,12 @@ possible_centers <- seq(min(subunit_df$start) + narrowest_center,
 
 
 ## Run bootstraps
-Function `one_boot` runs a single bootstrap replicate, given a sample size `n` by 
-sampling `n` locations within `possible_centers` (with replacement) and getting the number
-of overlapping subunits for each. 
+Function `one_boot` runs a single bootstrap replicate, given a sample size `n`, by 
+sampling `n` locations within `possible_centers` (with replacement) and counting the 
+number of overlapping subunits for each. 
 
-I then ran 10,000 bootstrap resamples, of sample size n~1~ + n~2~ + n~3~ (for all 3
-samples from `peak_df`), and output results to `pos_boot_matrix`.
+I ran 10,000 bootstrap resamples, of sample size n~1~ + n~2~ + n~3~ (for all 3
+samples from `peak_df`), and output results to `cent_boot_matrix`.
 
 ```{r bootstrapping, eval = FALSE}
 one_boot <- function(n){
@@ -155,7 +148,7 @@ one_boot <- function(n){
 }
 
 set.seed(80502)
-pos_boot_matrix <- replicate(1e4, expr = one_boot(n = nrow(peak_df)))
+cent_boot_matrix <- replicate(1e4, expr = one_boot(n = nrow(peak_df)))
 ```
 
 ```{r input_boot_results, echo = FALSE}
@@ -164,74 +157,86 @@ pos_boot_matrix <- replicate(1e4, expr = one_boot(n = nrow(peak_df)))
 
 
 
-## Bootstrap plots
+## Organize bootstrap output matrix
 
+The output from bootstrapping, `cent_boot_matrix`, is in a pretty ugly format: a 75 row,
+10,000 column matrix.
 
-
-```{r after_boot}
-# Data frame of mean and sd by sample and simulation #
-pos_boot_df <- pos_boot_matrix %>%
-    tibble::as_data_frame(.) %>%
-    # Factor to split matrix of bootstrap resamples by sample: peak_df$sample
-    mutate(sample = (peak_df$sample)) %>% # Extra parentheses prevent an error
-    gather('sim', 'overs', -sample) %>%
-    # Change 'V1', 'V2', etc. column names to an integer vector of simulation #:
-    mutate(sim = as.integer(sim %>% gsub('V', '', .))) %>%
-    group_by(sample, sim) %>%
-    summarize(mean = mean(overs), sd = sd(overs)) %>%
-    group_by(sample) %>%
-    select(sample, mean, sd)
-
-
-# Data frame of p values
-p_df <- data.frame(sample = factor(levels(peak_df$sample), levels = c('B6', '9R', '13R')),
-                  mean = sapply(levels(peak_df$sample), function(sampName){
-                      focalMean <- (summary_df %>% 
-                                        filter(sample == sampName) %>% 
-                                        select(mean))[[1]]
-                      pos_boot_df %>% 
-                          # We predict higher mean overlaps in peak sites
-                          filter(sample == sampName, mean >= focalMean) %>% 
-                          nrow() / 10000}
-                  ),
-                  sd = sapply(levels(peak_df$sample), function(sampName){
-                      focalSD <- (summary_df %>% 
-                                      filter(sample == sampName) %>% 
-                                      select(sd))[[1]]
-                      pos_boot_df %>% 
-                          # We predict lower variability in peak sites
-                          filter(sample == sampName, sd <= focalSD) %>% 
-                          nrow() / 10000}
-                  )) %>%
-    as.tbl()
-
-
+```{r boot_out_head}
+str(cent_boot_matrix)
 ```
 
 
+### Convert to tibble data frame
+
+To make this much easier to work with, I'm going to first convert the matrix to a 
+`tbl_df` (pronounced "tibble data frame"), which is a data frame with better 
+printing, among other attributes. 
+(I use these types of data frames almost exclusively, but this is the only portion of 
+code where the difference is necessary to explain.)
+For more information on tibble data frames, run `vignette('tibble', 'tibble')`
+
+The package `tibble` is already installed with `dplyr`, but `dplyr` has its own
+`as_data_frame` command that we don't want to use here. 
+This is why I specify the package by using `tibble::as_data_frame`.
+
+The new column `sample` I create is directly from the `peak_df` data frame and will be 
+used later to split the bootstrap resamples by sample.
+
+The `gather` function converts data from "wide" format to "tall" (i.e., fewer columns, 
+more rows). See [this link](https://rpubs.com/bradleyboehmke/data_wrangling) for 
+more information.
+
+The `gather` command made the `num` column contain the column names 
+`"V1" ... "V10000"`. I changed that to an integer from 1 to 10,000 indicating the 
+bootstrap number.
+
+```{r boot_to_df}
+```
+
+
+### Summarize by bootstrap
+
+I want to compare overlapping subunit mean and variability between observed and 
+bootstrap resamples, so I need to summarize our bootstrapping results. 
+I first summarize by sample and bootstrap number, calculating the mean and standard 
+deviation for each sample, for each bootstrap. Our final `cent_boot_df` data frame
+contains 10,000 rows (1 for each bootstrap) for each sample, so 30,000 rows total.
+
+```{r boot_summ_by_bootstrap}
+```
+
+
+### Summarize by sample
+
+I now construct a p-value data frame by grouping by sample, then assessing, for each 
+sample, the proportion of bootstrapped means were ≥ the observed mean and standard
+deviations were ≤ the observed standard deviation.
+
+```{r boot_summ_by_sample}
+```
+
+
+
+
+
+
+# Plots
+
+
+## Mean overlapping subunits
 
 Histogram of the mean numbers of subunits within flanks for 10^4^ bootstrap resamples of
 positions along MSY long arm, in relation to mean subunits in flanks for each sample 
 (dashed lines). P-values for tests of H~0~: µ~sample~ ≤ µ~random~ are shown.
 
 
-```{r bootPlotMean}
-
-
-pos_boot_df %>%
-    ggplot(aes(x = mean, color = sample, fill = sample)) +
-    plot_theme() +
-    xlab('Mean # subunits overlapping flanks') +
-    geom_histogram(binwidth = 0.5, color = NA, alpha = 0.8) +
-    geom_vline(data = summary_df, aes(xintercept = mean, color = sample), 
-               linetype = 2) + 
-    geom_text(data = p_df, aes(label = paste0(sample, ':  P = ', mean), 
-                              x = 65, y = 1000), 
-              hjust = 0, vjust = 1, nudge_y = c(0, -100, -200)) +
-    scale_fill_brewer(type = "qual", palette = 'Dark2') +
-    scale_color_brewer(type = "qual", palette = 'Dark2')
+```{r boot_plot_mean}
 ```
 
+
+
+## Variability in overlapping subunits
 
 Histogram of the standard deviation of subunits within flanks for 10^4^ bootstrap 
 resamples of positions along MSY long arm, in relation to standard deviations of 
@@ -239,22 +244,7 @@ subunits in flanks for each sample (dashed lines). P-values for tests of H~0~:
 σ~sample~ ≥ σ~random~ are shown.
 
 
-```{r bootPlotSD}
-
-pos_boot_df %>%
-    ggplot(aes(x = sd, color = sample, fill = sample)) +
-    plot_theme() +
-    xlab('Standard deviation of the # subunits overlapping flanks') +
-    geom_histogram(binwidth = 0.25, color = NA, alpha = 0.8) +
-    geom_vline(data = summary_df, aes(xintercept = sd, color = sample), 
-               linetype = 2) + 
-    geom_text(data = p_df, aes(label = paste0(sample, ':  P = ', sd), 
-                              x = 5, y = 1000), 
-              hjust = 0, vjust = 1, nudge_y = c(0, -100, -200)) +
-    scale_fill_brewer(type = "qual", palette = 'Dark2') +
-    scale_color_brewer(type = "qual", palette = 'Dark2')
-
-
+```{r boot_plot_sd}
 ```
 
 

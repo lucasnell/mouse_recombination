@@ -14,9 +14,13 @@ plot_theme <- function(base_size = 10, base_family = 'Helvetica') {
             panel.grid = element_blank(),
             panel.border = element_rect(fill = NA, color = "gray50"),
             axis.ticks = element_line(color = "gray50"),
-            axis.ticks.length = unit(2, 'points')
+            axis.ticks.length = unit(2, 'points'),
+            legend.position = 'none'
         )
 }
+
+fill_palette <- scale_fill_brewer(type = "qual", palette = 'Dark2')
+color_palette <- scale_color_brewer(type = "qual", palette = 'Dark2')
 
 ## @knitr load_RData
 load(file = 'ChIP_subunits.RData')
@@ -54,13 +58,13 @@ peak_df <- lapply(c('9R', '13R', 'B6'), one_peak, subunit_data_frame = subunit_d
 subunit_df %>%
     ggplot(aes(x = start/1e6)) + 
     plot_theme() +
+    theme(legend.position = c(0.8, 0.8)) +
     geom_histogram(aes(y = ..density..), binwidth = 1.000000, 
                    fill = 'gray80', color = NA) + 
     geom_rug(data = peak_df, aes(color = sample), size = 0.75, sides = 'b') +
     ylab('Density of subunits') +
     xlab('Location on chromosome (Mb)') +
-    scale_color_brewer(type = "qual", palette = 'Dark2')
-
+    color_palette
 
 
 
@@ -93,11 +97,78 @@ summary_df <- peak_df %>%
 summary_df
 
 
-
 ## @knitr input_boot_results
-# save(pos_boot_matrix, file = 'pos_boot_matrix.RData', compress = TRUE)
-load('pos_boot_matrix.RData')
+# save(cent_boot_matrix, file = 'cent_boot_matrix.RData', compress = TRUE)
+load('cent_boot_matrix.RData')
 
 
 
+
+## @knitr boot_to_df
+cent_boot_df <- cent_boot_matrix %>%
+    tibble::as_data_frame(.) %>%
+    # Extra parentheses below prevent "Error: invalid subscript type 'closure'"
+    mutate(sample = (peak_df$sample)) %>%
+    gather('num', 'overs', -sample) %>%
+    mutate(num = as.integer(num %>% gsub('V', '', .)))
+
+
+## @knitr boot_summ_by_bootstrap
+cent_boot_df <- cent_boot_df %>%
+    group_by(sample, num) %>%
+    summarize(mean = mean(overs), sd = sd(overs)) %>%
+    ungroup %>%
+    select(sample, mean, sd)
+
+
+
+## @knitr boot_summ_by_sample
+p_df <- cent_boot_df %>%
+    group_by(sample) %>%
+    summarize(
+        mean = length(
+            mean[mean >= summary_df$mean[summary_df$sample == head(sample,1)]]
+        ) / n(),
+        sd = length(
+            sd[sd <= summary_df$sd[summary_df$sample == head(sample,1)]]
+        ) / n()
+    )
+p_df
+
+
+
+
+
+
+
+## @knitr boot_plot_mean
+cent_boot_df %>%
+    ggplot(aes(x = mean, color = sample, fill = sample)) +
+    plot_theme() +
+    xlab('Mean # subunits overlapping flanks') +
+    geom_histogram(binwidth = 0.5, color = NA, alpha = 0.8) +
+    geom_vline(data = summary_df, aes(xintercept = mean, color = sample), 
+               linetype = 2) + 
+    geom_text(data = p_df, aes(label = paste0(sample, ':  P = ', mean), 
+                               x = 65, y = 1000), 
+              hjust = 0, vjust = 1, nudge_y = c(0, -100, -200), 
+              fontface = 'bold') +
+    fill_palette + color_palette
+
+
+
+
+## @knitr boot_plot_sd
+cent_boot_df %>%
+    ggplot(aes(x = sd, color = sample, fill = sample)) +
+    plot_theme() +
+    xlab('Standard deviation of the # subunits overlapping flanks') +
+    geom_histogram(binwidth = 0.25, color = NA, alpha = 0.8) +
+    geom_vline(data = summary_df, aes(xintercept = sd, color = sample), 
+               linetype = 2) + 
+    geom_text(data = p_df, aes(label = paste0(sample, ':  P = ', sd), 
+                               x = 5, y = 1000), 
+              hjust = 0, vjust = 1, nudge_y = c(0, -100, -200), 
+              fontface = 'bold') +
+    fill_palette + color_palette
 
