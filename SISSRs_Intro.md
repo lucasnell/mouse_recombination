@@ -47,14 +47,14 @@ BED files can be found in the directory
 `/Volumes/MW_18TB/Lucas_Nell/lan/musChIP/bed`. I primarily used BED files that were
 filtered for mapping quality (MAPQ) ≥ 20.
 
-$$MAPQ = -10 * log_{10}(p)$$
+> *MAPQ = -10 * log10(p)*
 
-"... where $p$ is an estimate of the probability that the alignment does not 
+"... where *p* is an estimate of the probability that the alignment does not 
 correspond to the read's true point of origin." 
 ([`bowtie2` manual](http://bowtie-bio.sourceforge.net/bowtie2/manual.shtml))
 
-So MAPQ ≥ 20 should mean that there is a probability of ≥ 0.01 that that read's 
-alignment is not the correct location.
+So MAPQ ≥ 20 should mean that there is a probability of ≤ 0.01 that that read's 
+alignment is not in the correct location.
 
 
 
