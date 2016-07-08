@@ -77,7 +77,8 @@ The naming scheme for all files is as follows:
 ### Name descriptions:
 
 - __`strain(s)`__
-    + Mouse strain: B6, CAST, PWD, or WSB
+    + Mouse strain: B6, CAST, PWD, or WSB. (If there was > 1 sample per strain from a
+      project, I only used sample #1.)
     + If multiple strains are represented by a file, they are all put here, separated 
       by '-' (e.g., `CAST-PWD-WSB`)
 - __`chromosome`__
@@ -145,7 +146,9 @@ p_val=0.01
 
 # Using ticks to create a variable from the stdout from a command
 # Piping to sed 's/string2/string2/' replaces any "string1" in the stdout to "string2"
-input_dna_bed=`echo ${chip_bed} | sed 's/_D/_Di/g; s/_H/_Hi/g'`
+# I'm using * in places because they count as any-length wildcards in searches
+# This allows me to find the input DNA file for B6, 9R, and 13R: "B6-9R-13R_Y_Diq.bed"
+input_dna_bed=*`echo ${chip_bed} | sed 's/_D/_Di/g; s/_H/_Hi/g; s/_X/*_X/g; s/_Y/*_Y/g'`
 
 # The commands ${var/%x/y} and ${var/#x/y} replaces "x" at the beginning and end of the
 # variable var with "y"
